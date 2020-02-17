@@ -865,49 +865,89 @@ static int send_file(nv3p_handle_t h3p, const char *filename)
 	struct stat sb;
 
 #define NVFLASH_DOWNLOAD_CHUNK (1024 * 64)
+	if (strcmp(filename, "-") == 0 ) {
+		//read from stdin
+		printf("sending file from stdin\n");
+		fd = STDIN_FILENO;
 
-	printf("sending file: %s\n", filename );
-
-	fd = open(filename, O_RDONLY, 0);
-	if (fd < 0) {
-		ret = errno;
-		goto fail;
-	}
-
-	if (fstat(fd, &sb) < 0) {
-		ret = errno;
-		goto fail;
-	}
-
-	total = sb.st_size;
-
-	buf = malloc( NVFLASH_DOWNLOAD_CHUNK );
-	if (!buf) {
-		ret = ENOMEM;
-		goto fail;
-	}
-
-	count = 0;
-	while(count != total) {
-		size = (uint32_t)MIN(total - count, NVFLASH_DOWNLOAD_CHUNK);
-
-		bytes = read(fd, buf, size);
-		if (bytes < 0) {
+		if (fd < 0) {
 			ret = errno;
 			goto fail;
 		}
 
-		ret = nv3p_data_send(h3p, buf, bytes);
-		if (ret)
+		if (fstat(fd, &sb) < 0) {
+			ret = errno;
 			goto fail;
+		}
+
+		if (!buf) {
+			ret = ENOMEM;
+			goto fail;
+		}
+		int bytes_read;
+		size = (uint32_t)MIN(total - count, NVFLASH_DOWNLOAD_CHUNK);
+		do {
+			bytes_read = read(fd, buf, size);
+			if (bytes < 0) {
+				ret = errno;
+				goto fail;
+			}
+		} while(bytes_read > 0);
+
+		ret = nv3p_data_send(h3p, buf, bytes);
+			if (ret)
+				goto fail;
 
 		count += bytes;
 
 		printf("\r%c %" PRIu64 "/%" PRIu64" bytes sent", spinner[spin_idx],
 			count, total);
-		spin_idx = (spin_idx + 1) % 4;
+			spin_idx = (spin_idx + 1) % 4;
+		printf("\nfilke from stdin was sent successfully\n");
 	}
-	printf("\n%s sent successfully\n", filename);
+	else {
+		printf("sending file: %s\n", filename );
+
+		fd = open(filename, O_RDONLY, 0);
+		if (fd < 0) {
+			ret = errno;
+			goto fail;
+		}
+
+		if (fstat(fd, &sb) < 0) {
+			ret = errno;
+			goto fail;
+		}
+
+		total = sb.st_size;
+
+		if (!buf) {
+			ret = ENOMEM;
+			goto fail;
+		}
+
+		count = 0;
+		while(count != total) {
+			size = (uint32_t)MIN(total - count, NVFLASH_DOWNLOAD_CHUNK);
+
+			bytes = read(fd, buf, size);
+			if (bytes < 0) {
+				ret = errno;
+				goto fail;
+			}
+
+			ret = nv3p_data_send(h3p, buf, bytes);
+			if (ret)
+				goto fail;
+
+			count += bytes;
+
+			printf("\r%c %" PRIu64 "/%" PRIu64" bytes sent", spinner[spin_idx],
+				count, total);
+			spin_idx = (spin_idx + 1) % 4;
+		}
+		printf("\n%s sent successfully\n", filename);
+	}
 
 #undef NVFLASH_DOWNLOAD_CHUNK
 
@@ -1161,19 +1201,26 @@ static int download_bootloader(nv3p_handle_t h3p, char *filename,
 	int fd;
 	struct stat sb;
 
-	fd = open(filename, O_RDONLY, 0);
-	if (fd < 0) {
-		dprintf("error opening %s for reading\n", filename);
-		return errno;
+	if (strcmp(filename, "-") == 0 ) {
+		//read from stdin
+	arg.length = 0;
 	}
+	else {
+		//read from file
+		fd = open(filename, O_RDONLY, 0);
+		if (fd < 0) {
+			dprintf("error opening %s for reading\n", filename);
+			return errno;
+		}
 
-	ret = fstat(fd, &sb);
-	if (ret) {
-		dprintf("error on fstat of %s\n", filename);
-		return ret;
+		ret = fstat(fd, &sb);
+		if (ret) {
+			dprintf("error on fstat of %s\n", filename);
+			return ret;
+		}
+		arg.length = sb.st_size;
+		close(fd);
 	}
-	arg.length = sb.st_size;
-	close(fd);
 
 	arg.entry = entry;
 	arg.address = loadaddr;

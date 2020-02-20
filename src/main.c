@@ -1205,7 +1205,7 @@ static int download_bootloader(nv3p_handle_t h3p, char *filename,
 
 	if (strcmp(filename, "-") == 0 ) {
 		//read from stdin
-	arg.length = 0;
+		arg.length = 585598;
 	}
 	else {
 		//read from file

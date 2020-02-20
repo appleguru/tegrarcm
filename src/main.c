@@ -879,7 +879,8 @@ static int send_file(nv3p_handle_t h3p, const char *filename)
 			ret = errno;
 			goto fail;
 		}
-
+		
+		buf = malloc( NVFLASH_DOWNLOAD_CHUNK );
 		if (!buf) {
 			ret = ENOMEM;
 			goto fail;
@@ -921,6 +922,7 @@ static int send_file(nv3p_handle_t h3p, const char *filename)
 
 		total = sb.st_size;
 
+		buf = malloc( NVFLASH_DOWNLOAD_CHUNK );
 		if (!buf) {
 			ret = ENOMEM;
 			goto fail;

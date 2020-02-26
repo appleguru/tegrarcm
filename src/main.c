@@ -849,6 +849,59 @@ fail:
 
 
 /*
+* send_file_from_buffer: send data present in buffer from stdin to nv3p server.
+*/
+static int send_file_from_buffer(nv3p_handle_t h3p, uint8_t *bootloader_buf, uint32_t size)
+{
+	int ret;
+	uint64_t total;
+	uint32_t bytes = 0;
+	uint64_t count = 0;
+	char *spinner = "-\\|/";
+	int spin_idx = 0;
+	int fd = -1;
+	struct stat sb;
+
+#define NVFLASH_DOWNLOAD_CHUNK (1024 * 64)
+	//read from stdin
+	printf("sending file from stdin\n");
+	fd = STDIN_FILENO;
+
+	if (fd < 0) {
+		ret = errno;
+		goto fail;
+	}
+
+	if (fstat(fd, &sb) < 0) {
+		ret = errno;
+		goto fail;
+	}
+
+	ret = nv3p_data_send(h3p, bootloader_buf, size);
+		if (ret)
+			goto fail;
+
+	count += bytes;
+
+	printf("\r%c %" PRIu64 "/%" PRIu64" bytes sent", spinner[spin_idx],
+		count, total);
+		spin_idx = (spin_idx + 1) % 4;
+	printf("\nfile from stdin was sent successfully\n");
+
+
+#undef NVFLASH_DOWNLOAD_CHUNK
+
+	close(fd);
+	return 0;
+
+fail:
+	if (fd != -1)
+		close(fd);
+	return ret;
+}
+
+
+/*
 * send_file: send data present in file "filename" to nv3p server.
 */
 static int send_file(nv3p_handle_t h3p, const char *filename)
@@ -865,91 +918,49 @@ static int send_file(nv3p_handle_t h3p, const char *filename)
 	struct stat sb;
 
 #define NVFLASH_DOWNLOAD_CHUNK (1024 * 64)
-	if (strcmp(filename, "-") == 0 ) {
-		//read from stdin
-		printf("sending file from stdin\n");
-		fd = STDIN_FILENO;
 
-		if (fd < 0) {
-			ret = errno;
-			goto fail;
-		}
+	printf("sending file: %s\n", filename );
 
-		if (fstat(fd, &sb) < 0) {
-			ret = errno;
-			goto fail;
-		}
-		
-		buf = malloc( NVFLASH_DOWNLOAD_CHUNK );
-		if (!buf) {
-			ret = ENOMEM;
-			goto fail;
-		}
-		int bytes_read;
+	fd = open(filename, O_RDONLY, 0);
+	if (fd < 0) {
+		ret = errno;
+		goto fail;
+	}
+
+	if (fstat(fd, &sb) < 0) {
+		ret = errno;
+		goto fail;
+	}
+
+	total = sb.st_size;
+
+	buf = malloc( NVFLASH_DOWNLOAD_CHUNK );
+	if (!buf) {
+		ret = ENOMEM;
+		goto fail;
+	}
+
+	count = 0;
+	while(count != total) {
 		size = (uint32_t)MIN(total - count, NVFLASH_DOWNLOAD_CHUNK);
-		do {
-			bytes_read = read(fd, buf, size);
-			if (bytes < 0) {
-				ret = errno;
-				goto fail;
-			}
-		} while(bytes_read > 0);
+
+		bytes = read(fd, buf, size);
+		if (bytes < 0) {
+			ret = errno;
+			goto fail;
+		}
 
 		ret = nv3p_data_send(h3p, buf, bytes);
-			if (ret)
-				goto fail;
+		if (ret)
+			goto fail;
 
 		count += bytes;
 
 		printf("\r%c %" PRIu64 "/%" PRIu64" bytes sent", spinner[spin_idx],
 			count, total);
-			spin_idx = (spin_idx + 1) % 4;
-		printf("\nfilke from stdin was sent successfully\n");
+		spin_idx = (spin_idx + 1) % 4;
 	}
-	else {
-		printf("sending file: %s\n", filename );
-
-		fd = open(filename, O_RDONLY, 0);
-		if (fd < 0) {
-			ret = errno;
-			goto fail;
-		}
-
-		if (fstat(fd, &sb) < 0) {
-			ret = errno;
-			goto fail;
-		}
-
-		total = sb.st_size;
-
-		buf = malloc( NVFLASH_DOWNLOAD_CHUNK );
-		if (!buf) {
-			ret = ENOMEM;
-			goto fail;
-		}
-
-		count = 0;
-		while(count != total) {
-			size = (uint32_t)MIN(total - count, NVFLASH_DOWNLOAD_CHUNK);
-
-			bytes = read(fd, buf, size);
-			if (bytes < 0) {
-				ret = errno;
-				goto fail;
-			}
-
-			ret = nv3p_data_send(h3p, buf, bytes);
-			if (ret)
-				goto fail;
-
-			count += bytes;
-
-			printf("\r%c %" PRIu64 "/%" PRIu64" bytes sent", spinner[spin_idx],
-				count, total);
-			spin_idx = (spin_idx + 1) % 4;
-		}
-		printf("\n%s sent successfully\n", filename);
-	}
+	printf("\n%s sent successfully\n", filename);
 
 #undef NVFLASH_DOWNLOAD_CHUNK
 
@@ -1200,12 +1211,28 @@ static int download_bootloader(nv3p_handle_t h3p, char *filename,
 {
 	int ret;
 	nv3p_cmd_dl_bl_t arg;
-	int fd;
+	int fd = 0;
 	struct stat sb;
+	uint8_t *bootloader_buf = 0;
+	uint32_t bytes_read = 0;
+	#define NVFLASH_DOWNLOAD_CHUNK (1024 * 64)
 
 	if (strcmp(filename, "-") == 0 ) {
 		//read from stdin
-		arg.length = 585598;
+		//arg.length = 585598;
+		bootloader_buf = malloc( NVFLASH_DOWNLOAD_CHUNK );
+		if (!bootloader_buf) {
+			ret = ENOMEM;
+			goto fail;
+		}
+		do {
+			bytes_read = read(fd, bootloader_buf, NVFLASH_DOWNLOAD_CHUNK);
+			if (bytes_read < 0) {
+				ret = errno;
+				goto fail;
+			}
+		} while(bytes_read > 0);
+		arg.length = bytes_read;
 	}
 	else {
 		//read from file
@@ -1280,12 +1307,28 @@ static int download_bootloader(nv3p_handle_t h3p, char *filename,
 		}
 	}
 
-	// send the bootloader file
-	ret = send_file(h3p, filename);
-	if (ret) {
-		dprintf("error downloading bootloader\n");
-		return ret;
+	if (strcmp(filename, "-") == 0 ) {
+		// send the bootloader file from the buffer
+		ret = send_file_from_buffer(h3p, bootloader_buf, bytes_read);
+		if (ret) {
+			dprintf("error downloading bootloader\n");
+			return ret;
+		}
 	}
+	else {
+		// send the bootloader file
+		ret = send_file(h3p, filename);
+		if (ret) {
+			dprintf("error downloading bootloader\n");
+			return ret;
+		}
+	}
+
+fail:
+	if (fd != -1)
+		close(fd);
+	if (bootloader_buf)
+		free(bootloader_buf);
 
 	return 0;
 }
